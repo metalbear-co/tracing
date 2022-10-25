@@ -1,13 +1,59 @@
 use crate::Msg;
 use crossbeam_channel::{Receiver, RecvError, TryRecvError};
-use std::fmt::Debug;
+use std::fmt;
 use std::io::Write;
 use std::{io, thread};
+
+#[derive(Default)]
+pub struct WorkerOptions {
+    on_thread_start: Option<Box<dyn Fn() + Send + Sync + 'static>>,
+    on_thread_stop: Option<Box<dyn Fn() + Send + Sync + 'static>>,
+}
+
+impl WorkerOptions {
+    pub fn on_thread_start(self, cb: impl Fn() + Send + Sync + 'static) -> Self {
+        WorkerOptions {
+            on_thread_start: Some(Box::new(cb)),
+            ..self
+        }
+    }
+
+    pub fn on_thread_stop(self, cb: impl Fn() + Send + Sync + 'static) -> Self {
+        WorkerOptions {
+            on_thread_stop: Some(Box::new(cb)),
+            ..self
+        }
+    }
+}
+
+impl fmt::Debug for WorkerOptions {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("WorkerOptions")
+            .field(
+                "on_thread_start",
+                if self.on_thread_start.is_some() {
+                    &"Some(callback)"
+                } else {
+                    &"None"
+                },
+            )
+            .field(
+                "on_thread_stop",
+                if self.on_thread_stop.is_some() {
+                    &"Some(callback)"
+                } else {
+                    &"None"
+                },
+            )
+            .finish()
+    }
+}
 
 pub(crate) struct Worker<T: Write + Send + Sync + 'static> {
     writer: T,
     receiver: Receiver<Msg>,
     shutdown: Receiver<()>,
+    options: WorkerOptions,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -19,11 +65,17 @@ pub(crate) enum WorkerState {
 }
 
 impl<T: Write + Send + Sync + 'static> Worker<T> {
-    pub(crate) fn new(receiver: Receiver<Msg>, writer: T, shutdown: Receiver<()>) -> Worker<T> {
+    pub(crate) fn new(
+        receiver: Receiver<Msg>,
+        writer: T,
+        shutdown: Receiver<()>,
+        options: WorkerOptions,
+    ) -> Worker<T> {
         Self {
             writer,
             receiver,
             shutdown,
+            options,
         }
     }
 
@@ -71,6 +123,8 @@ impl<T: Write + Send + Sync + 'static> Worker<T> {
         thread::Builder::new()
             .name("tracing-appender".to_string())
             .spawn(move || {
+                self.options.on_thread_start.as_ref().map(|cb| cb());
+
                 loop {
                     match self.work() {
                         Ok(WorkerState::Continue) | Ok(WorkerState::Empty) => {}
@@ -86,6 +140,8 @@ impl<T: Write + Send + Sync + 'static> Worker<T> {
                 if let Err(e) = self.writer.flush() {
                     eprintln!("Failed to flush. Error: {}", e);
                 }
+
+                self.options.on_thread_stop.as_ref().map(|cb| cb());
             })
             .expect("failed to spawn `tracing-appender` non-blocking worker thread")
     }
