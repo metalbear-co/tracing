@@ -185,3 +185,5 @@ pub(crate) enum Msg {
     Line(Vec<u8>),
     Shutdown,
 }
+
+pub use worker::WorkerOptions;

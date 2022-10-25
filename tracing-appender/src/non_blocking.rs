@@ -46,7 +46,7 @@
 //! });
 //! # }
 //! ```
-use crate::worker::Worker;
+use crate::worker::{Worker, WorkerOptions};
 use crate::Msg;
 use crossbeam_channel::{bounded, SendTimeoutError, Sender};
 use std::io;
@@ -154,12 +154,13 @@ impl NonBlocking {
         writer: T,
         buffered_lines_limit: usize,
         is_lossy: bool,
+        options: WorkerOptions,
     ) -> (NonBlocking, WorkerGuard) {
         let (sender, receiver) = bounded(buffered_lines_limit);
 
         let (shutdown_sender, shutdown_receiver) = bounded(0);
 
-        let worker = Worker::new(receiver, writer, shutdown_receiver);
+        let worker = Worker::new(receiver, writer, shutdown_receiver, options);
         let worker_guard =
             WorkerGuard::new(worker.worker_thread(), sender.clone(), shutdown_sender);
 
@@ -187,6 +188,7 @@ impl NonBlocking {
 pub struct NonBlockingBuilder {
     buffered_lines_limit: usize,
     is_lossy: bool,
+    worker_options: WorkerOptions,
 }
 
 impl NonBlockingBuilder {
@@ -207,9 +209,19 @@ impl NonBlockingBuilder {
         self
     }
 
+    pub fn worker_options(mut self, worker_options: WorkerOptions) -> NonBlockingBuilder {
+        self.worker_options = worker_options;
+        self
+    }
+
     /// Completes the builder, returning the configured `NonBlocking`.
     pub fn finish<T: Write + Send + Sync + 'static>(self, writer: T) -> (NonBlocking, WorkerGuard) {
-        NonBlocking::create(writer, self.buffered_lines_limit, self.is_lossy)
+        NonBlocking::create(
+            writer,
+            self.buffered_lines_limit,
+            self.is_lossy,
+            self.worker_options,
+        )
     }
 }
 
@@ -218,6 +230,7 @@ impl Default for NonBlockingBuilder {
         NonBlockingBuilder {
             buffered_lines_limit: DEFAULT_BUFFERED_LINES_LIMIT,
             is_lossy: true,
+            worker_options: WorkerOptions::default(),
         }
     }
 }
