@@ -365,10 +365,14 @@ pub fn instrument(
     args: proc_macro::TokenStream,
     item: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
-    let args = syn::parse_macro_input!(args as attr::InstrumentArgs);
-    // Cloning a `TokenStream` is cheap since it's reference counted internally.
-    instrument_precise(args.clone(), item.clone())
+    if std::env::var("PROFILE").is_ok_and(|profile| profile.eq("release")) {
+        args
+    } else {
+        let args = syn::parse_macro_input!(args as attr::InstrumentArgs);
+        // Cloning a `TokenStream` is cheap since it's reference counted internally.
+        instrument_precise(args.clone(), item.clone())
         .unwrap_or_else(|_err| instrument_speculative(args, item))
+    }
 }
 
 /// Instrument the function, without parsing the function body (instead using the raw tokens).
